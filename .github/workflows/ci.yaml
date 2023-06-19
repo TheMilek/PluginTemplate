@@ -1,0 +1,161 @@
+name: Continuous Integration
+
+on:
+    push: ~
+    pull_request: ~
+    release:
+        types: [created]
+    workflow_dispatch: ~
+
+jobs:
+    minimal:
+        runs-on: ubuntu-latest
+
+        name: "Minimal setup PHP ${{ matrix.php }}, MySQL ${{ matrix.mysql }}"
+
+        strategy:
+            fail-fast: false
+            matrix:
+                php: ["8.0", "8.1"]
+                node: ["16.x"]
+                mysql: ["5.7", "8.0"]
+
+        steps:
+            -   uses: actions/checkout@v3
+
+            -   name: Shutdown default MySQL
+                run: sudo service mysql stop
+
+            -   name: Setup MySQL
+                uses: mirromutth/mysql-action@v1.1
+                with:
+                    mysql version: "${{ matrix.mysql }}"
+                    mysql root password: "root"
+
+            -   name: Setup PHP
+                uses: shivammathur/setup-php@v2
+                with:
+                    php-version: "${{ matrix.php }}"
+                    extensions: "intl, gd, opcache, mysql, pdo_mysql, pgsql, pdo_pgsql"
+                    tools: "symfony"
+
+            -   name: Install certificates
+                run: symfony server:ca:install
+
+            -   name: Setup Node
+                uses: actions/setup-node@v3
+                with:
+                    node-version: "${{ matrix.node }}"
+
+            -   name: Install configurator's dependencies
+                run: composer update
+
+            -   name: Configure plugin
+                run: composer configure -- Sylius ExamplePlugin sylius/example-plugin "Our example plugin for Sylius" -n --no-docker --no-psalm --no-phpstan --no-ecs --no-phpunit --no-phpspec --no-behat --no-scaffold --database-engine=mysql --database-user=root --database-password=root --database-name=sylius --database-host=127.0.0.1 --database-port=3306
+
+            -   name: Setup plugin
+                run: make setup
+
+            -   name: Run webserver
+                run: symfony server:start --port=8080 --dir=tests/Application --daemon
+
+            -   name: Warm up container
+                run: tests/Application/bin/console cache:warmup
+
+            -
+                name: Upload logs
+                uses: actions/upload-artifact@v3
+                if: failure()
+                with:
+                    name: Logs
+                    path: |
+                        var/log/
+                    if-no-files-found: ignore
+    full:
+        runs-on: ubuntu-latest
+
+        name: "Full setup PHP ${{ matrix.php }}, MySQL ${{ matrix.mysql }}"
+
+        strategy:
+            fail-fast: false
+            matrix:
+                php: ["8.0", "8.1"]
+                node: ["16.x"]
+                mysql: ["5.7", "8.0"]
+
+        steps:
+            -   uses: actions/checkout@v3
+                
+
+            -   name: Shutdown default MySQL
+                run: sudo service mysql stop
+
+            -   name: Setup MySQL
+                uses: mirromutth/mysql-action@v1.1
+                with:
+                    mysql version: "${{ matrix.mysql }}"
+                    mysql root password: "root"
+
+            -   name: Setup PHP
+                uses: shivammathur/setup-php@v2
+                with:
+                    php-version: "${{ matrix.php }}"
+                    extensions: "intl, gd, opcache, mysql, pdo_mysql, pgsql, pdo_pgsql"
+                    tools: "symfony"
+
+            -   name: Install certificates
+                run: symfony server:ca:install
+
+            -   uses: browser-actions/setup-chrome@latest
+                with:
+                    chrome-version: latest
+
+            -   name: Run Chrome Headless
+                run: |
+                    export DISPLAY=:99
+                    chrome --enable-automation --disable-background-networking --no-default-browser-check --no-first-run --disable-popup-blocking --disable-default-apps --allow-insecure-localhost --disable-translate --remote-debugging-port=9222 --disable-extensions --no-sandbox --enable-features=Metal --headless --window-size=2880,1800 --proxy-server='direct://' --proxy-bypass-list='*' http://127.0.0.1 > /dev/null 2>&1 &
+
+            -   name: Setup Node
+                uses: actions/setup-node@v3
+                with:
+                    node-version: "${{ matrix.node }}"
+
+            -   name: Install configurator's dependencies
+                run: composer update
+
+            -   name: Configure plugin
+                run: composer configure -- Sylius ExamplePlugin sylius/example-plugin "Our example plugin for Sylius" -n --database-engine=mysql --database-user=root --database-password=root --database-name=sylius --database-host=127.0.0.1 --database-port=3306
+
+            -   name: Setup plugin
+                run: make setup
+
+            -   name: Warm up container (normal)
+                run: tests/Application/bin/console cache:warmup
+
+            -   name: Warm up container (test)
+                run: tests/Application/bin/console cache:warmup --env=test
+            
+            -   name: Run CI scripts
+                run: make ci
+
+            -   name: Run webserver
+                env:
+                    APP_ENV: test
+                run: symfony server:start --port=8080 --dir=tests/Application --daemon
+
+            -
+                name: Run Behat
+                env:
+                    APP_ENV: test
+                run: vendor/bin/behat --colors --strict -vvv --no-interaction || vendor/bin/behat --colors --strict -vvv --no-interaction --rerun
+
+            -
+                name: Upload logs
+                uses: actions/upload-artifact@v3
+                if: failure()
+                with:
+                    name: Behat logs
+                    path: |
+                        etc/build/
+                        var/log/
+                    if-no-files-found: ignore

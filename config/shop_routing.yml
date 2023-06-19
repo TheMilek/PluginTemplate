@@ -1,0 +1,13 @@
+# Delete these routes and define your own shop routes here
+
+:config_key_static_welcome:
+    path: /static-welcome/{name}
+    defaults:
+        _controller: :full_namespace\Controller\GreetingController::staticallyGreetAction
+        name: ~
+
+:config_key_dynamic_welcome:
+    path: /dynamic-welcome/{name}
+    defaults:
+        _controller: :full_namespace\Controller\GreetingController::dynamicallyGreetAction
+        name: ~

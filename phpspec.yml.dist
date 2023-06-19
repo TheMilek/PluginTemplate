@@ -1,0 +1,4 @@
+suites:
+    main:
+        namespace: :full_namespace
+        psr4_prefix: :full_namespace
